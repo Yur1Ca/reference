@@ -1,14 +1,16 @@
 name: 每5天更新一次reference
 on:
   schedule:
-    - cron: '0 0 */5 * *' # 定时任务
-  workflow_dispatch:       # 手动运行
+    - cron: '0 0 */5 * *'
+  workflow_dispatch:
 
-env: # 设置环境变量
-  TZ: Asia/Shanghai # 时区（设置时区可使页面中的`最近更新时间`使用时区时间）
+env:
+  TZ: Asia/Shanghai
+  SERVER_IP: 42.194.225.63
+  DEPLOY_PATH: /opt/1panel/www/sites/reference/index
 
 jobs:
-  build: # 自定义名称
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: 🚜 拉取最新代码
@@ -22,14 +24,51 @@ jobs:
           echo -e 'REF_URL=https://reference.hanacloud.site\nREF_LABEL=网站首页' > .env
           npm install
           npm run build
+          
+      - name: 📊 检查文件大小
+        run: du -sh dist
+          
+      - name: 📦 压缩构建文件
+        run: |
+          TIMESTAMP=$(date +%Y%m%d%H%M%S)
+          tar -czf dist-$TIMESTAMP.tar.gz -C dist .
+          echo "压缩完成，文件大小:"
+          du -sh dist-$TIMESTAMP.tar.gz
 
-      - name: 🚁 部署到服务器
-        uses: wlixcc/SFTP-Deploy-Action@v1.0
+      - name: 🚀 上传压缩包到服务器
+        uses: appleboy/scp-action@master
         with:
-          username: 'root'   #ssh user name
-          port: '22' # 远程服务器ssh端口，默认22
-          server: '42.194.225.63' # 远程服务器IP
-          ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }} # 认证服务器秘钥对的私钥
-          local_path: './dist/*'  # 对应我们项目打包后的静态文件路径
-          remote_path: '/opt/1panel/www/sites/reference/index' # 服务器上的路径
-          delete_remote_files: true
+          host: ${{ env.SERVER_IP }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          source: "dist-*.tar.gz"
+          target: "/tmp/"
+          rm: true
+
+      - name: 🛠️ 服务器端解压部署
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ env.SERVER_IP }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          script: |
+            LATEST_TAR=$(ls -t /tmp/dist-*.tar.gz | head -1)
+            
+            echo "备份当前版本..."
+            BACKUP_DIR="/opt/1panel/www/sites/reference/backups/$(date +%Y%m%d%H%M%S)"
+            mkdir -p "$BACKUP_DIR"
+            cp -r ${{ env.DEPLOY_PATH }} "$BACKUP_DIR"
+            
+            echo "解压新版本: $LATEST_TAR"
+            tar -xzf "$LATEST_TAR" -C ${{ env.DEPLOY_PATH }} --strip-components=0
+            
+            echo "清理临时文件..."
+            rm -f "$LATEST_TAR"
+            
+            chown -R www-data:www-data ${{ env.DEPLOY_PATH }}
+            chmod -R 755 ${{ env.DEPLOY_PATH }}
+            
+            echo "✅ 部署完成！"
+            echo "备份位置: $BACKUP_DIR"
