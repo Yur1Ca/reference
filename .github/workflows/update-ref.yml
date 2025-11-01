@@ -1,7 +1,7 @@
-name: 每5天更新一次reference
+name: 每12小时更新一次reference
 on:
   schedule:
-    - cron: '0 0 */5 * *'
+    - cron: '0 */12 * * *'
   workflow_dispatch:
 
 env:
